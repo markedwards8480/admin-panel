@@ -507,7 +507,7 @@ app.post('/api/railway/sync', requireAdmin, async (req, res) => {
             }
         `;
 
-        const response = await fetch('https://backboard.railway.app/graphql/v2', {
+        const response = await fetch('https://backboard.railway.com/graphql/v2', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -587,7 +587,7 @@ app.get('/api/railway/status', requireAdmin, async (req, res) => {
     }
 
     try {
-        const response = await fetch('https://backboard.railway.app/graphql/v2', {
+        const response = await fetch('https://backboard.railway.com/graphql/v2', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
