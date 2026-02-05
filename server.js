@@ -372,7 +372,7 @@ app.get('/api/apps', requireAdmin, async (req, res) => {
 
 // Create app
 app.post('/api/apps', requireAdmin, async (req, res) => {
-    const { name, slug, description, url } = req.body;
+    const { name, slug, description, url, is_active } = req.body;
 
     if (!name || !slug) {
         return res.status(400).json({ error: 'Name and slug are required' });
@@ -382,16 +382,16 @@ app.post('/api/apps', requireAdmin, async (req, res) => {
 
     try {
         const result = await pool.query(
-            'INSERT INTO apps (name, slug, description, url, api_key) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [name, slug.toLowerCase(), description, url, apiKey]
+            'INSERT INTO apps (name, slug, description, url, api_key, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [name, slug.toLowerCase(), description, url, apiKey, is_active !== undefined ? is_active : true]
         );
         res.json(result.rows[0]);
     } catch (err) {
         if (err.code === '23505') {
             return res.status(400).json({ error: 'Slug already exists' });
         }
-        console.error('Create app error:', err);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Create app error:', err.message, err.stack);
+        res.status(500).json({ error: 'Server error', details: process.env.NODE_ENV === 'development' ? err.message : undefined });
     }
 });
 
