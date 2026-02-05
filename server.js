@@ -34,6 +34,24 @@ async function initializeDatabase() {
 
         if (tableCheck.rows[0].exists) {
             console.log('Database already initialized.');
+            
+            // Check and add missing columns to existing tables
+            console.log('Checking for missing columns in existing tables...');
+            
+            // Add description column to apps table if it doesn't exist
+            const descriptionColumnCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'apps' AND column_name = 'description'
+                );
+            `);
+            
+            if (!descriptionColumnCheck.rows[0].exists) {
+                console.log('Adding missing description column to apps table...');
+                await pool.query('ALTER TABLE apps ADD COLUMN description TEXT');
+                console.log('Description column added successfully.');
+            }
+            
             return;
         }
 
