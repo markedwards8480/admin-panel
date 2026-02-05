@@ -625,6 +625,171 @@ app.get('/api/railway/status', requireAdmin, async (req, res) => {
     }
 });
 
+// Get all Railway projects (for dropdown)
+app.get('/api/railway/projects', requireAdmin, async (req, res) => {
+    const railwayToken = process.env.RAILWAY_API_TOKEN;
+    
+    if (!railwayToken) {
+        return res.status(400).json({ error: 'Railway API token not configured in environment variables' });
+    }
+
+    try {
+        const query = `
+            {
+                me {
+                    projects {
+                        edges {
+                            node {
+                                id
+                                name
+                                description
+                                createdAt
+                            }
+                        }
+                    }
+                }
+            }
+        `;
+
+        const response = await fetch('https://backboard.railway.com/graphql/v2', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${railwayToken}`
+            },
+            body: JSON.stringify({ query })
+        });
+
+        const data = await response.json();
+
+        if (data.errors) {
+            return res.status(400).json({ error: 'Railway API error: ' + data.errors[0].message });
+        }
+
+        const projects = data.data?.me?.projects?.edges.map(edge => edge.node) || [];
+        res.json(projects);
+    } catch (err) {
+        console.error('Fetch Railway projects error:', err);
+        res.status(500).json({ error: 'Failed to fetch Railway projects: ' + err.message });
+    }
+});
+
+// Sync apps from a specific Railway project
+app.post('/api/railway/sync/:projectId', requireAdmin, async (req, res) => {
+    const { projectId } = req.params;
+    const railwayToken = process.env.RAILWAY_API_TOKEN;
+    
+    if (!railwayToken) {
+        return res.status(400).json({ error: 'Railway API token not configured in environment variables' });
+    }
+
+    try {
+        const query = `
+            {
+                project(id: "${projectId}") {
+                    id
+                    name
+                    services {
+                        edges {
+                            node {
+                                id
+                                name
+                                serviceInstances {
+                                    edges {
+                                        node {
+                                            domains {
+                                                serviceDomains {
+                                                    domain
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        `;
+
+        const response = await fetch('https://backboard.railway.com/graphql/v2', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${railwayToken}`
+            },
+            body: JSON.stringify({ query })
+        });
+
+        const data = await response.json();
+
+        if (data.errors) {
+            return res.status(400).json({ error: 'Railway API error: ' + data.errors[0].message });
+        }
+
+        const project = data.data?.project;
+        if (!project) {
+            return res.status(404).json({ error: 'Project not found' });
+        }
+
+        const services = project.services?.edges || [];
+        let synced = 0;
+        let skipped = 0;
+        const syncedApps = [];
+
+        for (const serviceEdge of services) {
+            const service = serviceEdge.node;
+            const serviceName = service.name;
+            const slug = serviceName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+            // Get the domain URL
+            let url = '';
+            const instances = service.serviceInstances?.edges || [];
+            if (instances.length > 0) {
+                const domains = instances[0].node?.domains?.serviceDomains || [];
+                if (domains.length > 0) {
+                    url = 'https://' + domains[0].domain;
+                }
+            }
+
+            // Check if app already exists
+            const existing = await pool.query('SELECT id, name, url FROM apps WHERE slug = $1', [slug]);
+
+            if (existing.rows.length === 0) {
+                // Insert new app
+                const apiKey = generateApiKey();
+                const result = await pool.query(
+                    'INSERT INTO apps (name, slug, description, url, api_key) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+                    [serviceName, slug, `Synced from Railway project: ${project.name}`, url, apiKey]
+                );
+                syncedApps.push(result.rows[0]);
+                synced++;
+            } else {
+                // Update URL if changed
+                if (existing.rows[0].url !== url && url) {
+                    await pool.query(
+                        'UPDATE apps SET url = $1, updated_at = CURRENT_TIMESTAMP WHERE slug = $2',
+                        [url, slug]
+                    );
+                }
+                syncedApps.push(existing.rows[0]);
+                skipped++;
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Synced project "${project.name}". Added ${synced} new apps, ${skipped} already existed.`,
+            synced,
+            skipped,
+            apps: syncedApps
+        });
+    } catch (err) {
+        console.error('Railway sync error:', err);
+        res.status(500).json({ error: 'Failed to sync with Railway: ' + err.message });
+    }
+});
+
 // ============================================
 // ACCESS CONTROL API ROUTES
 // ============================================
