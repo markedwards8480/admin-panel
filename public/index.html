@@ -258,7 +258,8 @@
         }
 
         .form-group input,
-        .form-group textarea {
+        .form-group textarea,
+        .form-group select {
             width: 100%;
             padding: 10px 14px;
             border: 1px solid #d1d5db;
@@ -267,7 +268,8 @@
         }
 
         .form-group input:focus,
-        .form-group textarea:focus {
+        .form-group textarea:focus,
+        .form-group select:focus {
             outline: none;
             border-color: #4a6cf7;
             box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.1);
@@ -575,8 +577,37 @@
         </div>
     </div>
 
+    <!-- Railway Sync Modal -->
+    <div class="modal-overlay" id="railwayModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Sync from Railway</h3>
+                <button class="modal-close" onclick="closeModal('railwayModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="railwayStatus" style="margin-bottom: 16px;"></div>
+                
+                <div class="form-group">
+                    <label>Select Railway Project</label>
+                    <select id="railwayProjectSelect" class="form-control" onchange="enableSyncButton()">
+                        <option value="">Loading projects...</option>
+                    </select>
+                </div>
+
+                <div id="railwaySyncResult" style="margin-top: 16px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeModal('railwayModal')">Cancel</button>
+                <button type="button" class="btn-primary" id="performSyncBtn" onclick="performRailwaySync()" disabled>
+                    Sync Selected Project
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentUser = null;
+        let railwayProjects = [];
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -809,28 +840,120 @@
 
         // Sync apps from Railway
         async function syncFromRailway() {
-            const btn = document.getElementById('railwaySyncBtn');
-            const textSpan = document.getElementById('railwaySyncText');
+            openModal('railwayModal');
+            document.getElementById('railwaySyncResult').innerHTML = '';
+            document.getElementById('railwayStatus').innerHTML = '<p>Checking Railway connection...</p>';
+            
+            // Check Railway status
+            try {
+                const statusRes = await fetch('/api/railway/status');
+                const status = await statusRes.json();
+                
+                if (!status.connected) {
+                    document.getElementById('railwayStatus').innerHTML = `
+                        <div style="padding: 12px; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b;">
+                            <strong>Railway Not Connected:</strong> ${status.message}
+                            <br><small>Please add RAILWAY_API_TOKEN to your environment variables.</small>
+                        </div>
+                    `;
+                    document.getElementById('railwayProjectSelect').innerHTML = '<option value="">Railway not configured</option>';
+                    return;
+                }
 
+                document.getElementById('railwayStatus').innerHTML = `
+                    <div style="padding: 12px; background: #d1fae5; border: 1px solid #6ee7b7; border-radius: 6px; color: #065f46;">
+                        <strong>✓ Connected to Railway</strong> (${status.email})
+                    </div>
+                `;
+
+                // Load projects
+                await loadRailwayProjects();
+            } catch (err) {
+                console.error('Railway status check failed:', err);
+                document.getElementById('railwayStatus').innerHTML = `
+                    <div style="padding: 12px; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b;">
+                        Failed to connect to Railway: ${err.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function loadRailwayProjects() {
+            try {
+                document.getElementById('railwayProjectSelect').innerHTML = '<option value="">Loading projects...</option>';
+                
+                const res = await fetch('/api/railway/projects');
+                railwayProjects = await res.json();
+                
+                const select = document.getElementById('railwayProjectSelect');
+                select.innerHTML = '<option value="">Select a project...</option>';
+                
+                railwayProjects.forEach(project => {
+                    const option = document.createElement('option');
+                    option.value = project.id;
+                    option.textContent = project.name;
+                    select.appendChild(option);
+                });
+                
+                if (railwayProjects.length === 0) {
+                    select.innerHTML = '<option value="">No projects found</option>';
+                }
+            } catch (err) {
+                console.error('Failed to load Railway projects:', err);
+                document.getElementById('railwayProjectSelect').innerHTML = '<option value="">Error loading projects</option>';
+                alert('Failed to load Railway projects: ' + err.message);
+            }
+        }
+
+        function enableSyncButton() {
+            const projectId = document.getElementById('railwayProjectSelect').value;
+            document.getElementById('performSyncBtn').disabled = !projectId;
+        }
+
+        async function performRailwaySync() {
+            const projectId = document.getElementById('railwayProjectSelect').value;
+            if (!projectId) return;
+
+            const projectName = railwayProjects.find(p => p.id === projectId)?.name || projectId;
+            const btn = document.getElementById('performSyncBtn');
+            
             btn.disabled = true;
-            textSpan.textContent = '🔄 Syncing...';
+            btn.textContent = 'Syncing...';
+            document.getElementById('railwaySyncResult').innerHTML = `<p>Syncing project "${projectName}"...</p>`;
 
             try {
-                const res = await fetch('/api/railway/sync', { method: 'POST' });
-                const data = await res.json();
+                const res = await fetch(`/api/railway/sync/${projectId}`, {
+                    method: 'POST'
+                });
 
-                if (res.ok) {
-                    alert(data.message);
+                const result = await res.json();
+
+                if (result.success) {
+                    document.getElementById('railwaySyncResult').innerHTML = `
+                        <div style="padding: 12px; background: #d1fae5; border: 1px solid #6ee7b7; border-radius: 6px; color: #065f46;">
+                            <strong>✓ Success!</strong> ${result.message}
+                            <ul style="margin: 8px 0 0 20px;">
+                                <li>${result.synced} new apps added</li>
+                                <li>${result.skipped} existing apps updated</li>
+                            </ul>
+                        </div>
+                    `;
+                    // Reload apps table
                     loadApps();
                     loadStats();
                 } else {
-                    alert('Error: ' + data.error);
+                    throw new Error(result.error || 'Sync failed');
                 }
             } catch (err) {
-                alert('Failed to sync: ' + err.message);
+                console.error('Railway sync failed:', err);
+                document.getElementById('railwaySyncResult').innerHTML = `
+                    <div style="padding: 12px; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b;">
+                        <strong>Error:</strong> ${err.message}
+                    </div>
+                `;
             } finally {
                 btn.disabled = false;
-                textSpan.textContent = '🚂 Sync from Railway';
+                btn.textContent = 'Sync Selected Project';
             }
         }
 
