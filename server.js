@@ -66,6 +66,35 @@ async function initializeDatabase() {
                 console.log('granted_by column added successfully.');
             }
 
+            // Create login_activity table if it doesn't exist
+            const loginActivityCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'login_activity'
+                );
+            `);
+
+            if (!loginActivityCheck.rows[0].exists) {
+                console.log('Creating login_activity table...');
+                await pool.query(`
+                    CREATE TABLE login_activity (
+                        id SERIAL PRIMARY KEY,
+                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        app_id INTEGER REFERENCES apps(id) ON DELETE CASCADE,
+                        login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        ip_address VARCHAR(45),
+                        city VARCHAR(100),
+                        region VARCHAR(100),
+                        country VARCHAR(100),
+                        user_agent TEXT
+                    );
+                    CREATE INDEX idx_login_activity_time ON login_activity(login_time DESC);
+                    CREATE INDEX idx_login_activity_user ON login_activity(user_id);
+                    CREATE INDEX idx_login_activity_app ON login_activity(app_id);
+                `);
+                console.log('login_activity table created successfully.');
+            }
+
             return;
         }
 
@@ -112,9 +141,24 @@ async function initializeDatabase() {
                 expire TIMESTAMP NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS login_activity (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                app_id INTEGER REFERENCES apps(id) ON DELETE CASCADE,
+                login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ip_address VARCHAR(45),
+                city VARCHAR(100),
+                region VARCHAR(100),
+                country VARCHAR(100),
+                user_agent TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_sessions_expire ON sessions(expire);
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
             CREATE INDEX IF NOT EXISTS idx_apps_slug ON apps(slug);
+            CREATE INDEX IF NOT EXISTS idx_login_activity_time ON login_activity(login_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_login_activity_user ON login_activity(user_id);
+            CREATE INDEX IF NOT EXISTS idx_login_activity_app ON login_activity(app_id);
             CREATE INDEX IF NOT EXISTS idx_apps_api_key ON apps(api_key);
             CREATE INDEX IF NOT EXISTS idx_user_app_access_user ON user_app_access(user_id);
             CREATE INDEX IF NOT EXISTS idx_user_app_access_app ON user_app_access(app_id);
@@ -231,6 +275,45 @@ function generatePassword() {
 
     // Format: Word-Word#! (e.g., "Apple-Tiger7!")
     return `${word1}-${word2}${num}${symbol}`;
+}
+
+// Log login activity with IP geolocation
+async function logLoginActivity(userId, appId, ipAddress, userAgent) {
+    try {
+        let city = null, region = null, country = null;
+
+        // Try to get location from IP using free ipapi.co service
+        // Skip for localhost/private IPs
+        if (ipAddress && !ipAddress.startsWith('127.') && !ipAddress.startsWith('192.168.') &&
+            !ipAddress.startsWith('10.') && ipAddress !== '::1' && ipAddress !== 'unknown') {
+            try {
+                const geoResponse = await fetch(`https://ipapi.co/${ipAddress}/json/`, {
+                    timeout: 3000
+                });
+                if (geoResponse.ok) {
+                    const geoData = await geoResponse.json();
+                    if (!geoData.error) {
+                        city = geoData.city || null;
+                        region = geoData.region || null;
+                        country = geoData.country_name || null;
+                    }
+                }
+            } catch (geoErr) {
+                // Geolocation failed, continue without it
+                console.log('Geolocation lookup failed:', geoErr.message);
+            }
+        }
+
+        // Insert activity record
+        await pool.query(
+            `INSERT INTO login_activity (user_id, app_id, ip_address, city, region, country, user_agent)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [userId, appId, ipAddress, city, region, country, userAgent]
+        );
+    } catch (err) {
+        console.error('Failed to log login activity:', err);
+        // Don't throw - this shouldn't break the login flow
+    }
 }
 
 // ============================================
@@ -1091,6 +1174,13 @@ app.post('/api/auth/verify', async (req, res) => {
         // Update last login
         await pool.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
 
+        // Log login activity
+        const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+        const userAgent = req.headers['user-agent'] || 'unknown';
+
+        // Try to get location from IP (async, don't wait for it)
+        logLoginActivity(user.id, app.id, ipAddress, userAgent);
+
         res.json({
             success: true,
             user: {
@@ -1130,6 +1220,120 @@ app.get('/api/auth/check-access', async (req, res) => {
         res.json({ success: true, user: result.rows[0] });
     } catch (err) {
         console.error('Check access error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// ============================================
+// ACTIVITY TRACKING API
+// ============================================
+
+// Get recent login activity
+app.get('/api/activity/recent', requireAdmin, async (req, res) => {
+    const limit = parseInt(req.query.limit) || 50;
+
+    try {
+        const result = await pool.query(`
+            SELECT la.id, la.login_time, la.ip_address, la.city, la.region, la.country, la.user_agent,
+                   u.id as user_id, u.name as user_name, u.email as user_email,
+                   a.id as app_id, a.name as app_name, a.slug as app_slug
+            FROM login_activity la
+            JOIN users u ON la.user_id = u.id
+            JOIN apps a ON la.app_id = a.id
+            ORDER BY la.login_time DESC
+            LIMIT $1
+        `, [limit]);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get recent activity error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get activity statistics summary
+app.get('/api/activity/stats', requireAdmin, async (req, res) => {
+    try {
+        const stats = await pool.query(`
+            SELECT
+                (SELECT COUNT(*) FROM login_activity WHERE login_time > NOW() - INTERVAL '24 hours') as logins_today,
+                (SELECT COUNT(*) FROM login_activity WHERE login_time > NOW() - INTERVAL '7 days') as logins_week,
+                (SELECT COUNT(DISTINCT user_id) FROM login_activity WHERE login_time > NOW() - INTERVAL '24 hours') as unique_users_today,
+                (SELECT COUNT(DISTINCT user_id) FROM login_activity WHERE login_time > NOW() - INTERVAL '7 days') as unique_users_week,
+                (SELECT COUNT(*) FROM login_activity) as total_logins
+        `);
+
+        res.json(stats.rows[0]);
+    } catch (err) {
+        console.error('Get activity stats error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get logins grouped by app
+app.get('/api/activity/by-app', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT a.id, a.name, a.slug,
+                   COUNT(la.id) as total_logins,
+                   COUNT(CASE WHEN la.login_time > NOW() - INTERVAL '7 days' THEN 1 END) as logins_week,
+                   COUNT(CASE WHEN la.login_time > NOW() - INTERVAL '24 hours' THEN 1 END) as logins_today,
+                   MAX(la.login_time) as last_login
+            FROM apps a
+            LEFT JOIN login_activity la ON a.id = la.app_id
+            WHERE a.is_active = true
+            GROUP BY a.id, a.name, a.slug
+            ORDER BY logins_week DESC
+        `);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get activity by app error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get logins grouped by location
+app.get('/api/activity/by-location', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT country, city, region,
+                   COUNT(*) as login_count,
+                   COUNT(DISTINCT user_id) as unique_users,
+                   MAX(login_time) as last_login
+            FROM login_activity
+            WHERE country IS NOT NULL
+            GROUP BY country, city, region
+            ORDER BY login_count DESC
+            LIMIT 50
+        `);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get activity by location error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get activity for a specific user
+app.get('/api/activity/user/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit) || 20;
+
+    try {
+        const result = await pool.query(`
+            SELECT la.id, la.login_time, la.ip_address, la.city, la.region, la.country, la.user_agent,
+                   a.name as app_name, a.slug as app_slug
+            FROM login_activity la
+            JOIN apps a ON la.app_id = a.id
+            WHERE la.user_id = $1
+            ORDER BY la.login_time DESC
+            LIMIT $2
+        `, [id, limit]);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get user activity error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });

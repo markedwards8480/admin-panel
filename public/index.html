@@ -387,6 +387,10 @@
                 <svg viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>
                 Apps
             </div>
+            <div class="nav-item" data-panel="activity">
+                <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                Activity
+            </div>
         </nav>
 
         <main class="content">
@@ -461,6 +465,65 @@
                         </thead>
                         <tbody id="appsTableBody"></tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- Activity Panel -->
+            <div class="panel" id="panel-activity">
+                <div class="panel-header">
+                    <h2>Login Activity</h2>
+                    <button class="btn-secondary" onclick="loadActivity()">↻ Refresh</button>
+                </div>
+
+                <!-- Activity Stats -->
+                <div class="stats-grid" style="margin-bottom: 24px;">
+                    <div class="stat-card">
+                        <h3>Logins Today</h3>
+                        <div class="value" id="stat-logins-today">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Logins This Week</h3>
+                        <div class="value" id="stat-logins-week">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Active Users Today</h3>
+                        <div class="value" id="stat-active-today">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Active Users This Week</h3>
+                        <div class="value" id="stat-active-week">-</div>
+                    </div>
+                </div>
+
+                <!-- App Usage -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                    <div class="card" style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-top: 0; font-size: 16px; color: #1a1a2e;">📊 Most Used Apps</h3>
+                        <div id="appUsageList" style="max-height: 200px; overflow-y: auto;"></div>
+                    </div>
+                    <div class="card" style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-top: 0; font-size: 16px; color: #1a1a2e;">🌍 Login Locations</h3>
+                        <div id="locationList" style="max-height: 200px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity Table -->
+                <div class="card" style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <h3 style="margin-top: 0; font-size: 16px; color: #1a1a2e;">🕐 Recent Logins</h3>
+                    <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>App</th>
+                                    <th>Location</th>
+                                    <th>IP Address</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activityTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </main>
@@ -692,6 +755,7 @@
                     if (item.dataset.panel === 'users') loadUsers();
                     if (item.dataset.panel === 'apps') { loadApps(); checkRailwayStatus(); }
                     if (item.dataset.panel === 'dashboard') loadStats();
+                    if (item.dataset.panel === 'activity') loadActivity();
                 });
             });
         }
@@ -711,6 +775,81 @@
             } catch (err) {
                 console.error('Failed to load stats:', err);
             }
+        }
+
+        // ============== ACTIVITY ==============
+        async function loadActivity() {
+            try {
+                // Load activity stats
+                const statsRes = await fetch('/api/activity/stats');
+                const stats = await statsRes.json();
+                document.getElementById('stat-logins-today').textContent = stats.logins_today || 0;
+                document.getElementById('stat-logins-week').textContent = stats.logins_week || 0;
+                document.getElementById('stat-active-today').textContent = stats.unique_users_today || 0;
+                document.getElementById('stat-active-week').textContent = stats.unique_users_week || 0;
+
+                // Load app usage
+                const appRes = await fetch('/api/activity/by-app');
+                const appUsage = await appRes.json();
+                document.getElementById('appUsageList').innerHTML = appUsage.length > 0
+                    ? appUsage.map(app => `
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                            <span>${escapeHtml(app.name)}</span>
+                            <span style="color: #6b7280;">
+                                <strong>${app.logins_week || 0}</strong> this week
+                            </span>
+                        </div>
+                    `).join('')
+                    : '<div style="color: #6b7280; padding: 20px; text-align: center;">No activity data yet</div>';
+
+                // Load locations
+                const locRes = await fetch('/api/activity/by-location');
+                const locations = await locRes.json();
+                document.getElementById('locationList').innerHTML = locations.length > 0
+                    ? locations.map(loc => `
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                            <span>📍 ${escapeHtml(loc.city || 'Unknown')}, ${escapeHtml(loc.country || 'Unknown')}</span>
+                            <span style="color: #6b7280;">
+                                <strong>${loc.login_count}</strong> logins
+                            </span>
+                        </div>
+                    `).join('')
+                    : '<div style="color: #6b7280; padding: 20px; text-align: center;">No location data yet</div>';
+
+                // Load recent activity
+                const recentRes = await fetch('/api/activity/recent?limit=50');
+                const recent = await recentRes.json();
+                const tbody = document.getElementById('activityTableBody');
+                tbody.innerHTML = recent.length > 0
+                    ? recent.map(activity => `
+                        <tr>
+                            <td><strong>${escapeHtml(activity.user_name)}</strong><br><small style="color:#6b7280">${escapeHtml(activity.user_email)}</small></td>
+                            <td>${escapeHtml(activity.app_name)}</td>
+                            <td>${activity.city ? `${escapeHtml(activity.city)}, ${escapeHtml(activity.country || '')}` : '<span style="color:#999">Unknown</span>'}</td>
+                            <td><small style="font-family: monospace;">${escapeHtml(activity.ip_address || 'N/A')}</small></td>
+                            <td>${formatTimeAgo(activity.login_time)}</td>
+                        </tr>
+                    `).join('')
+                    : '<tr><td colspan="5" style="text-align: center; padding: 40px; color: #6b7280;">No login activity recorded yet. Activity will appear here when users log in to your apps.</td></tr>';
+
+            } catch (err) {
+                console.error('Failed to load activity:', err);
+            }
+        }
+
+        function formatTimeAgo(dateString) {
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return date.toLocaleDateString();
         }
 
         // ============== USERS ==============
