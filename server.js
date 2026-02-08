@@ -51,7 +51,21 @@ async function initializeDatabase() {
                 await pool.query('ALTER TABLE apps ADD COLUMN description TEXT');
                 console.log('Description column added successfully.');
             }
-            
+
+            // Add granted_by column to user_app_access table if it doesn't exist
+            const grantedByColumnCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns
+                    WHERE table_name = 'user_app_access' AND column_name = 'granted_by'
+                );
+            `);
+
+            if (!grantedByColumnCheck.rows[0].exists) {
+                console.log('Adding missing granted_by column to user_app_access table...');
+                await pool.query('ALTER TABLE user_app_access ADD COLUMN granted_by INTEGER REFERENCES users(id)');
+                console.log('granted_by column added successfully.');
+            }
+
             return;
         }
 
