@@ -368,6 +368,7 @@
         <h1>Admin Panel</h1>
         <div class="header-right">
             <span class="user-name" id="userName"></span>
+            <button class="btn-help" onclick="showHelp()" style="background: #6366f1; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; margin-right: 8px;">? Help</button>
             <button class="btn-logout" onclick="logout()">Sign Out</button>
         </div>
     </header>
@@ -612,6 +613,43 @@
         </div>
     </div>
 
+    <!-- Help Modal -->
+    <div class="modal-overlay" id="helpModal">
+        <div class="modal" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>📖 Admin Panel Quick Guide</h3>
+                <button class="modal-close" onclick="closeModal('helpModal')">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align: left;">
+                <h4 style="margin-top: 0; color: #1a1a2e;">👤 Managing Users</h4>
+                <ul style="margin-bottom: 20px; line-height: 1.8;">
+                    <li><strong>Add User:</strong> Click "+ Add User". Password auto-generates by default (like "Ocean-Tiger5!")</li>
+                    <li><strong>Edit User:</strong> Click the blue ✏️ pencil icon</li>
+                    <li><strong>Reset Password:</strong> Click the orange 🔑 key icon → new password shown in popup</li>
+                    <li><strong>Manage App Access:</strong> Click the 🌐 globe icon → check which apps user can access</li>
+                    <li><strong>Delete User:</strong> Click the red 🗑️ trash icon</li>
+                </ul>
+
+                <h4 style="color: #1a1a2e;">📱 Managing Apps</h4>
+                <ul style="margin-bottom: 20px; line-height: 1.8;">
+                    <li><strong>Add App:</strong> Click "+ Add App" and enter name/URL</li>
+                    <li><strong>API Key:</strong> Each app gets a unique API key for authentication</li>
+                    <li><strong>Sync from Railway:</strong> Auto-import apps from your Railway project</li>
+                </ul>
+
+                <h4 style="color: #1a1a2e;">🔐 Password Info</h4>
+                <ul style="line-height: 1.8;">
+                    <li>Passwords are stored securely (hashed) - they cannot be retrieved</li>
+                    <li>Auto-generated passwords use format: <code>Word-Word#!</code></li>
+                    <li>If a user forgets their password, use the Reset Password button</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-primary" onclick="closeModal('helpModal')">Got it!</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentUser = null;
         let railwayProjects = [];
@@ -656,6 +694,10 @@
                     if (item.dataset.panel === 'dashboard') loadStats();
                 });
             });
+        }
+
+        function showHelp() {
+            document.getElementById('helpModal').classList.add('active');
         }
 
         async function loadStats() {
