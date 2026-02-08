@@ -185,6 +185,30 @@ function generateApiKey() {
     return 'app_' + crypto.randomBytes(32).toString('hex');
 }
 
+// Generate secure random password
+function generatePassword(length = 12) {
+    const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lowercase = 'abcdefghjkmnpqrstuvwxyz';
+    const numbers = '23456789';
+    const symbols = '!@#$%^&*';
+    const allChars = uppercase + lowercase + numbers + symbols;
+
+    // Ensure at least one of each type
+    let password = '';
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += symbols[Math.floor(Math.random() * symbols.length)];
+
+    // Fill the rest randomly
+    for (let i = password.length; i < length; i++) {
+        password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+
+    // Shuffle the password
+    return password.split('').sort(() => Math.random() - 0.5).join('');
+}
+
 // ============================================
 // PAGE ROUTES
 // ============================================
@@ -287,19 +311,34 @@ app.get('/api/users', requireAdmin, async (req, res) => {
 
 // Create user
 app.post('/api/users', requireAdmin, async (req, res) => {
-    const { email, password, name, is_admin } = req.body;
+    const { email, password, name, is_admin, auto_generate_password } = req.body;
 
-    if (!email || !password || !name) {
-        return res.status(400).json({ error: 'Email, password, and name are required' });
+    if (!email || !name) {
+        return res.status(400).json({ error: 'Email and name are required' });
+    }
+
+    // Either use provided password or auto-generate one
+    let userPassword = password;
+    let generatedPassword = null;
+
+    if (auto_generate_password || !password) {
+        generatedPassword = generatePassword(12);
+        userPassword = generatedPassword;
     }
 
     try {
-        const passwordHash = await bcrypt.hash(password, 10);
+        const passwordHash = await bcrypt.hash(userPassword, 10);
         const result = await pool.query(
             'INSERT INTO users (email, password_hash, name, is_admin) VALUES ($1, $2, $3, $4) RETURNING id, email, name, is_admin, is_active, created_at',
             [email.toLowerCase(), passwordHash, name, is_admin || false]
         );
-        res.json(result.rows[0]);
+
+        const response = result.rows[0];
+        // Include the generated password in the response so admin can share it with the user
+        if (generatedPassword) {
+            response.generated_password = generatedPassword;
+        }
+        res.json(response);
     } catch (err) {
         if (err.code === '23505') { // Unique violation
             return res.status(400).json({ error: 'Email already exists' });
@@ -341,6 +380,91 @@ app.put('/api/users/:id', requireAdmin, async (req, res) => {
         }
         console.error('Update user error:', err);
         res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Admin reset user password (generates new password)
+app.post('/api/users/:id/reset-password', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // Check if user exists
+        const userCheck = await pool.query('SELECT id, email, name FROM users WHERE id = $1', [id]);
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Generate new password
+        const newPassword = generatePassword(12);
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+
+        // Update user's password
+        await pool.query(
+            'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [passwordHash, id]
+        );
+
+        res.json({
+            success: true,
+            message: `Password reset for ${userCheck.rows[0].name}`,
+            new_password: newPassword,
+            user: {
+                id: userCheck.rows[0].id,
+                email: userCheck.rows[0].email,
+                name: userCheck.rows[0].name
+            }
+        });
+    } catch (err) {
+        console.error('Reset password error:', err);
+        res.status(500).json({ error: 'Failed to reset password' });
+    }
+});
+
+// User change own password (requires current password)
+app.post('/api/auth/change-password', async (req, res) => {
+    const { current_password, new_password } = req.body;
+
+    // Check if user is logged in
+    if (!req.session.userId) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    if (!current_password || !new_password) {
+        return res.status(400).json({ error: 'Current password and new password are required' });
+    }
+
+    if (new_password.length < 8) {
+        return res.status(400).json({ error: 'New password must be at least 8 characters long' });
+    }
+
+    try {
+        // Get user's current password hash
+        const userResult = await pool.query(
+            'SELECT id, password_hash FROM users WHERE id = $1',
+            [req.session.userId]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Verify current password
+        const validPassword = await bcrypt.compare(current_password, userResult.rows[0].password_hash);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+
+        // Hash and save new password
+        const newPasswordHash = await bcrypt.hash(new_password, 10);
+        await pool.query(
+            'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [newPasswordHash, req.session.userId]
+        );
+
+        res.json({ success: true, message: 'Password changed successfully' });
+    } catch (err) {
+        console.error('Change password error:', err);
+        res.status(500).json({ error: 'Failed to change password' });
     }
 });
 
@@ -820,6 +944,12 @@ app.put('/api/users/:id/access', requireAdmin, async (req, res) => {
     const { app_ids } = req.body; // Array of app IDs the user should have access to
 
     try {
+        // Verify user exists
+        const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [id]);
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
         // Start transaction
         await pool.query('BEGIN');
 
@@ -828,14 +958,16 @@ app.put('/api/users/:id/access', requireAdmin, async (req, res) => {
 
         // Add new access
         if (app_ids && app_ids.length > 0) {
-            const values = app_ids.map((appId, index) =>
-                `($1, $${index + 2}, $${app_ids.length + 2})`
-            ).join(', ');
+            // Get granted_by - use session user or null if not available
+            const grantedBy = req.session.userId || null;
 
-            await pool.query(
-                `INSERT INTO user_app_access (user_id, app_id, granted_by) VALUES ${values}`,
-                [id, ...app_ids, req.session.userId]
-            );
+            // Insert each app access individually for better error handling
+            for (const appId of app_ids) {
+                await pool.query(
+                    `INSERT INTO user_app_access (user_id, app_id, granted_by) VALUES ($1, $2, $3)`,
+                    [id, appId, grantedBy]
+                );
+            }
         }
 
         await pool.query('COMMIT');
@@ -844,7 +976,8 @@ app.put('/api/users/:id/access', requireAdmin, async (req, res) => {
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error('Update user access error:', err);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Error details:', err.message, err.code);
+        res.status(500).json({ error: 'Failed to save access settings: ' + err.message });
     }
 });
 
