@@ -199,28 +199,38 @@ function generateApiKey() {
     return 'app_' + crypto.randomBytes(32).toString('hex');
 }
 
-// Generate secure random password
-function generatePassword(length = 12) {
-    const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-    const lowercase = 'abcdefghjkmnpqrstuvwxyz';
-    const numbers = '23456789';
-    const symbols = '!@#$%^&*';
-    const allChars = uppercase + lowercase + numbers + symbols;
+// Generate memorable password using Word-Word-Number-Symbol format
+function generatePassword() {
+    // Common, easy-to-remember words (capitalized)
+    const words = [
+        'Apple', 'Beach', 'Cloud', 'Dance', 'Eagle', 'Flame', 'Green', 'Happy',
+        'Island', 'Jungle', 'Kite', 'Lemon', 'Magic', 'Night', 'Ocean', 'Piano',
+        'Quest', 'River', 'Storm', 'Tiger', 'Unity', 'Vivid', 'Water', 'Xray',
+        'Yellow', 'Zebra', 'Amber', 'Brave', 'Coral', 'Dream', 'Frost', 'Globe',
+        'Heart', 'Ivory', 'Jewel', 'Karma', 'Light', 'Maple', 'Noble', 'Olive',
+        'Pearl', 'Quilt', 'Radar', 'Silk', 'Trust', 'Ultra', 'Valor', 'Wheel',
+        'Blue', 'Candy', 'Delta', 'Echo', 'Flora', 'Grace', 'Honey', 'Jazz',
+        'Luna', 'Mocha', 'Nova', 'Opal', 'Prism', 'Rose', 'Solar', 'Terra',
+        'Brave', 'Crisp', 'Dusk', 'Ember', 'Fresh', 'Glow', 'Haze', 'Iris',
+        'Jade', 'Keen', 'Leaf', 'Mist', 'Neon', 'Oak', 'Peak', 'Rust', 'Sky'
+    ];
 
-    // Ensure at least one of each type
-    let password = '';
-    password += uppercase[Math.floor(Math.random() * uppercase.length)];
-    password += lowercase[Math.floor(Math.random() * lowercase.length)];
-    password += numbers[Math.floor(Math.random() * numbers.length)];
-    password += symbols[Math.floor(Math.random() * symbols.length)];
+    const numbers = ['2', '3', '4', '5', '6', '7', '8', '9'];
+    const symbols = ['!', '@', '#', '$', '%', '&', '*'];
 
-    // Fill the rest randomly
-    for (let i = password.length; i < length; i++) {
-        password += allChars[Math.floor(Math.random() * allChars.length)];
+    // Pick two random words
+    const word1 = words[Math.floor(Math.random() * words.length)];
+    let word2 = words[Math.floor(Math.random() * words.length)];
+    // Ensure word2 is different from word1
+    while (word2 === word1) {
+        word2 = words[Math.floor(Math.random() * words.length)];
     }
 
-    // Shuffle the password
-    return password.split('').sort(() => Math.random() - 0.5).join('');
+    const num = numbers[Math.floor(Math.random() * numbers.length)];
+    const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+
+    // Format: Word-Word#! (e.g., "Apple-Tiger7!")
+    return `${word1}-${word2}${num}${symbol}`;
 }
 
 // ============================================
