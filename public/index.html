@@ -391,6 +391,10 @@
                 <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
                 Activity
             </div>
+            <div class="nav-item" data-panel="health">
+                <svg viewBox="0 0 24 24"><path d="M19.5 12c0-.23-.01-.45-.03-.68l1.86-1.41c.4-.3.51-.86.26-1.3l-1.87-3.23c-.25-.44-.79-.62-1.25-.42l-2.15.91c-.37-.26-.76-.49-1.17-.68l-.29-2.31c-.06-.5-.49-.88-.99-.88h-3.73c-.51 0-.94.38-1 .88l-.29 2.31c-.41.19-.8.42-1.17.68l-2.15-.91c-.46-.2-1-.02-1.25.42L2.41 8.62c-.25.44-.14.99.26 1.3l1.86 1.41c-.02.22-.03.44-.03.67s.01.45.03.68l-1.86 1.41c-.4.3-.51.86-.26 1.3l1.87 3.23c.25.44.79.62 1.25.42l2.15-.91c.37.26.76.49 1.17.68l.29 2.31c.06.5.49.88.99.88h3.73c.5 0 .93-.38.99-.88l.29-2.31c.41-.19.8-.42 1.17-.68l2.15.91c.46.2 1 .02 1.25-.42l1.87-3.23c.25-.44.14-.99-.26-1.3l-1.86-1.41c.03-.23.04-.45.04-.68zm-7.46 3.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+                Health
+            </div>
         </nav>
 
         <main class="content">
@@ -522,6 +526,74 @@
                                 </tr>
                             </thead>
                             <tbody id="activityTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Health Panel -->
+            <div class="panel" id="panel-health">
+                <div class="panel-header">
+                    <h2>System Health</h2>
+                    <button class="btn-primary" onclick="runHealthChecks()" id="runHealthBtn">🔍 Run Health Checks</button>
+                </div>
+
+                <!-- Health Summary -->
+                <div class="stats-grid" style="margin-bottom: 24px;">
+                    <div class="stat-card" id="health-summary-healthy" style="border-left: 4px solid #22c55e;">
+                        <h3>Healthy</h3>
+                        <div class="value" id="stat-healthy" style="color: #22c55e;">-</div>
+                    </div>
+                    <div class="stat-card" id="health-summary-unhealthy" style="border-left: 4px solid #ef4444;">
+                        <h3>Unhealthy</h3>
+                        <div class="value" id="stat-unhealthy" style="color: #ef4444;">-</div>
+                    </div>
+                    <div class="stat-card" id="health-summary-unknown" style="border-left: 4px solid #f59e0b;">
+                        <h3>Unknown</h3>
+                        <div class="value" id="stat-unknown" style="color: #f59e0b;">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Avg Response</h3>
+                        <div class="value" id="stat-avg-response">-</div>
+                    </div>
+                </div>
+
+                <!-- App Status Table -->
+                <div class="card" style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px;">
+                    <h3 style="margin-top: 0; font-size: 16px; color: #1a1a2e;">🖥️ App Status</h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>App</th>
+                                    <th>URL</th>
+                                    <th>Response Time</th>
+                                    <th>Last Check</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="healthTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Data Freshness -->
+                <div class="card" style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <h3 style="margin-top: 0; font-size: 16px; color: #1a1a2e;">📊 Data Freshness</h3>
+                    <p style="color: #6b7280; margin-bottom: 16px;">Track when data was last updated in your apps. Apps can report their data freshness using the API.</p>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>App</th>
+                                    <th>Data Source</th>
+                                    <th>Last Updated</th>
+                                    <th>Records</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="freshnessTableBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -756,6 +828,7 @@
                     if (item.dataset.panel === 'apps') { loadApps(); checkRailwayStatus(); }
                     if (item.dataset.panel === 'dashboard') loadStats();
                     if (item.dataset.panel === 'activity') loadActivity();
+                    if (item.dataset.panel === 'health') loadHealth();
                 });
             });
         }
@@ -850,6 +923,121 @@
             if (diffHours < 24) return `${diffHours}h ago`;
             if (diffDays < 7) return `${diffDays}d ago`;
             return date.toLocaleDateString();
+        }
+
+        // ============== HEALTH ==============
+        async function loadHealth() {
+            try {
+                // Load health status
+                const statusRes = await fetch('/api/health/status');
+                const status = await statusRes.json();
+
+                // Calculate summary stats
+                let healthy = 0, unhealthy = 0, unknown = 0, totalResponse = 0, responseCount = 0;
+                status.forEach(app => {
+                    if (app.status === 'healthy') healthy++;
+                    else if (app.status === 'unhealthy' || app.status === 'error') unhealthy++;
+                    else unknown++;
+
+                    if (app.response_time_ms) {
+                        totalResponse += app.response_time_ms;
+                        responseCount++;
+                    }
+                });
+
+                document.getElementById('stat-healthy').textContent = healthy;
+                document.getElementById('stat-unhealthy').textContent = unhealthy;
+                document.getElementById('stat-unknown').textContent = unknown;
+                document.getElementById('stat-avg-response').textContent = responseCount > 0
+                    ? Math.round(totalResponse / responseCount) + 'ms'
+                    : '-';
+
+                // Render health table
+                const tbody = document.getElementById('healthTableBody');
+                tbody.innerHTML = status.length > 0
+                    ? status.map(app => `
+                        <tr>
+                            <td>${getStatusBadge(app.status)}</td>
+                            <td><strong>${escapeHtml(app.name)}</strong><br><small style="color:#6b7280">${escapeHtml(app.slug)}</small></td>
+                            <td><small>${app.url ? `<a href="${escapeHtml(app.url)}" target="_blank">${escapeHtml(app.url)}</a>` : '<span style="color:#999">No URL</span>'}</small></td>
+                            <td>${app.response_time_ms ? app.response_time_ms + 'ms' : '-'}</td>
+                            <td>${app.check_time ? formatTimeAgo(app.check_time) : 'Never'}</td>
+                            <td>${app.error_message ? `<small style="color:#ef4444">${escapeHtml(app.error_message)}</small>` : '-'}</td>
+                        </tr>
+                    `).join('')
+                    : '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #6b7280;">No apps found. Add apps first, then run health checks.</td></tr>';
+
+                // Load data freshness
+                const freshnessRes = await fetch('/api/health/freshness');
+                const freshness = await freshnessRes.json();
+
+                const freshnessTbody = document.getElementById('freshnessTableBody');
+                freshnessTbody.innerHTML = freshness.length > 0
+                    ? freshness.map(item => `
+                        <tr>
+                            <td><strong>${escapeHtml(item.app_name)}</strong></td>
+                            <td>${escapeHtml(item.data_source)}</td>
+                            <td>${item.last_updated ? formatTimeAgo(item.last_updated) : 'Never'}</td>
+                            <td>${item.record_count ? item.record_count.toLocaleString() : '-'}</td>
+                            <td>${getFreshnessBadge(item.last_updated)}</td>
+                        </tr>
+                    `).join('')
+                    : '<tr><td colspan="5" style="text-align: center; padding: 40px; color: #6b7280;">No data freshness records yet. Apps can report their data freshness using the API.</td></tr>';
+
+            } catch (err) {
+                console.error('Failed to load health:', err);
+            }
+        }
+
+        function getStatusBadge(status) {
+            switch (status) {
+                case 'healthy':
+                    return '<span class="badge badge-success">✓ Healthy</span>';
+                case 'unhealthy':
+                    return '<span class="badge badge-danger">✗ Unhealthy</span>';
+                case 'error':
+                    return '<span class="badge badge-danger">⚠ Error</span>';
+                case 'no_url':
+                    return '<span class="badge" style="background:#f59e0b;color:white;">No URL</span>';
+                default:
+                    return '<span class="badge" style="background:#6b7280;color:white;">Unknown</span>';
+            }
+        }
+
+        function getFreshnessBadge(lastUpdated) {
+            if (!lastUpdated) {
+                return '<span class="badge" style="background:#6b7280;color:white;">No Data</span>';
+            }
+            const hoursAgo = (Date.now() - new Date(lastUpdated)) / 3600000;
+            if (hoursAgo < 24) {
+                return '<span class="badge badge-success">Fresh</span>';
+            } else if (hoursAgo < 72) {
+                return '<span class="badge" style="background:#f59e0b;color:white;">Stale</span>';
+            } else {
+                return '<span class="badge badge-danger">Outdated</span>';
+            }
+        }
+
+        async function runHealthChecks() {
+            const btn = document.getElementById('runHealthBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Checking...';
+
+            try {
+                const res = await fetch('/api/health/check-all', { method: 'POST' });
+                const result = await res.json();
+
+                if (result.success) {
+                    loadHealth(); // Reload the data
+                } else {
+                    alert('Health check failed');
+                }
+            } catch (err) {
+                alert('Failed to run health checks');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 Run Health Checks';
+            }
         }
 
         // ============== USERS ==============

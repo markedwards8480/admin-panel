@@ -95,6 +95,57 @@ async function initializeDatabase() {
                 console.log('login_activity table created successfully.');
             }
 
+            // Create health_checks table if it doesn't exist
+            const healthChecksCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'health_checks'
+                );
+            `);
+
+            if (!healthChecksCheck.rows[0].exists) {
+                console.log('Creating health_checks table...');
+                await pool.query(`
+                    CREATE TABLE health_checks (
+                        id SERIAL PRIMARY KEY,
+                        app_id INTEGER REFERENCES apps(id) ON DELETE CASCADE,
+                        check_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status VARCHAR(20) NOT NULL,
+                        response_time_ms INTEGER,
+                        status_code INTEGER,
+                        error_message TEXT
+                    );
+                    CREATE INDEX idx_health_checks_app ON health_checks(app_id);
+                    CREATE INDEX idx_health_checks_time ON health_checks(check_time DESC);
+                `);
+                console.log('health_checks table created successfully.');
+            }
+
+            // Create data_freshness table for tracking data imports
+            const dataFreshnessCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'data_freshness'
+                );
+            `);
+
+            if (!dataFreshnessCheck.rows[0].exists) {
+                console.log('Creating data_freshness table...');
+                await pool.query(`
+                    CREATE TABLE data_freshness (
+                        id SERIAL PRIMARY KEY,
+                        app_id INTEGER REFERENCES apps(id) ON DELETE CASCADE,
+                        data_source VARCHAR(255) NOT NULL,
+                        last_updated TIMESTAMP,
+                        record_count INTEGER,
+                        notes TEXT,
+                        UNIQUE(app_id, data_source)
+                    );
+                    CREATE INDEX idx_data_freshness_app ON data_freshness(app_id);
+                `);
+                console.log('data_freshness table created successfully.');
+            }
+
             return;
         }
 
@@ -1334,6 +1385,176 @@ app.get('/api/activity/user/:id', requireAdmin, async (req, res) => {
         res.json(result.rows);
     } catch (err) {
         console.error('Get user activity error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// ============================================
+// HEALTH CHECK API
+// ============================================
+
+// Perform health check on a single app
+async function checkAppHealth(app) {
+    const startTime = Date.now();
+    let status = 'unknown';
+    let statusCode = null;
+    let errorMessage = null;
+    let responseTimeMs = null;
+
+    if (!app.url) {
+        return { status: 'no_url', responseTimeMs: null, statusCode: null, errorMessage: 'No URL configured' };
+    }
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+        const response = await fetch(app.url, {
+            method: 'GET',
+            signal: controller.signal,
+            headers: { 'User-Agent': 'AdminPanel-HealthCheck/1.0' }
+        });
+
+        clearTimeout(timeout);
+        responseTimeMs = Date.now() - startTime;
+        statusCode = response.status;
+
+        if (response.ok) {
+            status = 'healthy';
+        } else {
+            status = 'unhealthy';
+            errorMessage = `HTTP ${response.status}`;
+        }
+    } catch (err) {
+        responseTimeMs = Date.now() - startTime;
+        status = 'error';
+        errorMessage = err.name === 'AbortError' ? 'Timeout (>10s)' : err.message;
+    }
+
+    return { status, responseTimeMs, statusCode, errorMessage };
+}
+
+// Run health checks on all apps
+app.post('/api/health/check-all', requireAdmin, async (req, res) => {
+    try {
+        const appsResult = await pool.query('SELECT id, name, url FROM apps WHERE is_active = true');
+        const results = [];
+
+        for (const app of appsResult.rows) {
+            const health = await checkAppHealth(app);
+
+            // Store the result
+            await pool.query(`
+                INSERT INTO health_checks (app_id, status, response_time_ms, status_code, error_message)
+                VALUES ($1, $2, $3, $4, $5)
+            `, [app.id, health.status, health.responseTimeMs, health.statusCode, health.errorMessage]);
+
+            results.push({
+                app_id: app.id,
+                app_name: app.name,
+                ...health
+            });
+        }
+
+        res.json({ success: true, results });
+    } catch (err) {
+        console.error('Health check error:', err);
+        res.status(500).json({ error: 'Failed to run health checks' });
+    }
+});
+
+// Get latest health status for all apps
+app.get('/api/health/status', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT ON (a.id)
+                a.id, a.name, a.slug, a.url,
+                hc.status, hc.response_time_ms, hc.status_code, hc.error_message, hc.check_time
+            FROM apps a
+            LEFT JOIN health_checks hc ON a.id = hc.app_id
+            WHERE a.is_active = true
+            ORDER BY a.id, hc.check_time DESC
+        `);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get health status error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get health history for an app
+app.get('/api/health/history/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit) || 50;
+
+    try {
+        const result = await pool.query(`
+            SELECT status, response_time_ms, status_code, error_message, check_time
+            FROM health_checks
+            WHERE app_id = $1
+            ORDER BY check_time DESC
+            LIMIT $2
+        `, [id, limit]);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get health history error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get/update data freshness for an app
+app.get('/api/health/freshness', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT df.*, a.name as app_name, a.slug as app_slug
+            FROM data_freshness df
+            JOIN apps a ON df.app_id = a.id
+            WHERE a.is_active = true
+            ORDER BY df.last_updated DESC
+        `);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get data freshness error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Update data freshness (can be called by apps via API)
+app.post('/api/health/freshness', async (req, res) => {
+    const { app_slug, data_source, last_updated, record_count, notes } = req.body;
+    const apiKey = req.headers['x-api-key'];
+
+    if (!apiKey) {
+        return res.status(401).json({ error: 'API key required' });
+    }
+
+    try {
+        // Verify API key
+        const appResult = await pool.query(
+            'SELECT id FROM apps WHERE api_key = $1 AND is_active = true',
+            [apiKey]
+        );
+
+        if (appResult.rows.length === 0) {
+            return res.status(401).json({ error: 'Invalid API key' });
+        }
+
+        const appId = appResult.rows[0].id;
+
+        // Upsert freshness record
+        await pool.query(`
+            INSERT INTO data_freshness (app_id, data_source, last_updated, record_count, notes)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (app_id, data_source)
+            DO UPDATE SET last_updated = $3, record_count = $4, notes = $5
+        `, [appId, data_source, last_updated || new Date(), record_count, notes]);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Update freshness error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
