@@ -146,6 +146,71 @@ async function initializeDatabase() {
                 console.log('data_freshness table created successfully.');
             }
 
+            // Create departments table if it doesn't exist
+            const departmentsCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'departments'
+                );
+            `);
+
+            if (!departmentsCheck.rows[0].exists) {
+                console.log('Creating departments table...');
+                await pool.query(`
+                    CREATE TABLE departments (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        slug VARCHAR(100) UNIQUE NOT NULL,
+                        sort_order INTEGER DEFAULT 0,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                `);
+                console.log('departments table created successfully.');
+            }
+
+            // Add department_id column to apps table if it doesn't exist
+            const deptIdColumnCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns
+                    WHERE table_name = 'apps' AND column_name = 'department_id'
+                );
+            `);
+
+            if (!deptIdColumnCheck.rows[0].exists) {
+                console.log('Adding department_id column to apps table...');
+                await pool.query('ALTER TABLE apps ADD COLUMN department_id INTEGER REFERENCES departments(id)');
+                console.log('department_id column added successfully.');
+            }
+
+            // Add icon column to apps table if it doesn't exist
+            const iconColumnCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns
+                    WHERE table_name = 'apps' AND column_name = 'icon'
+                );
+            `);
+
+            if (!iconColumnCheck.rows[0].exists) {
+                console.log('Adding icon column to apps table...');
+                await pool.query("ALTER TABLE apps ADD COLUMN icon VARCHAR(20) DEFAULT '📱'");
+                console.log('icon column added successfully.');
+            }
+
+            // Add color column to apps table if it doesn't exist
+            const colorColumnCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns
+                    WHERE table_name = 'apps' AND column_name = 'color'
+                );
+            `);
+
+            if (!colorColumnCheck.rows[0].exists) {
+                console.log('Adding color column to apps table...');
+                await pool.query("ALTER TABLE apps ADD COLUMN color VARCHAR(50) DEFAULT 'color-blue'");
+                console.log('color column added successfully.');
+            }
+
             return;
         }
 
@@ -172,9 +237,21 @@ async function initializeDatabase() {
                 description TEXT,
                 url VARCHAR(500),
                 api_key VARCHAR(255) UNIQUE NOT NULL,
+                icon VARCHAR(20) DEFAULT '📱',
+                color VARCHAR(50) DEFAULT 'color-blue',
+                department_id INTEGER,
                 is_active BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS departments (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                slug VARCHAR(100) UNIQUE NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS user_app_access (
@@ -657,10 +734,12 @@ app.delete('/api/users/:id', requireAdmin, async (req, res) => {
 app.get('/api/apps', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT a.*, COUNT(uaa.user_id) as user_count
+            SELECT a.*, d.name as department_name, d.slug as department_slug,
+                   COUNT(uaa.user_id) as user_count
             FROM apps a
+            LEFT JOIN departments d ON a.department_id = d.id
             LEFT JOIN user_app_access uaa ON a.id = uaa.app_id
-            GROUP BY a.id
+            GROUP BY a.id, d.name, d.slug
             ORDER BY a.name
         `);
         res.json(result.rows);
@@ -672,7 +751,7 @@ app.get('/api/apps', requireAdmin, async (req, res) => {
 
 // Create app
 app.post('/api/apps', requireAdmin, async (req, res) => {
-    const { name, slug, description, url, is_active } = req.body;
+    const { name, slug, description, url, icon, color, department_id, is_active } = req.body;
 
     if (!name || !slug) {
         return res.status(400).json({ error: 'Name and slug are required' });
@@ -682,8 +761,8 @@ app.post('/api/apps', requireAdmin, async (req, res) => {
 
     try {
         const result = await pool.query(
-            'INSERT INTO apps (name, slug, description, url, api_key, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [name, slug.toLowerCase(), description, url, apiKey, is_active !== undefined ? is_active : true]
+            'INSERT INTO apps (name, slug, description, url, api_key, icon, color, department_id, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+            [name, slug.toLowerCase(), description, url, apiKey, icon || '📱', color || 'color-blue', department_id || null, is_active !== undefined ? is_active : true]
         );
         res.json(result.rows[0]);
     } catch (err) {
@@ -698,13 +777,13 @@ app.post('/api/apps', requireAdmin, async (req, res) => {
 // Update app
 app.put('/api/apps/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
-    const { name, slug, description, url, is_active } = req.body;
+    const { name, slug, description, url, icon, color, department_id, is_active } = req.body;
 
     try {
         const result = await pool.query(
-            `UPDATE apps SET name = $1, slug = $2, description = $3, url = $4, is_active = $5, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $6 RETURNING *`,
-            [name, slug.toLowerCase(), description, url, is_active, id]
+            `UPDATE apps SET name = $1, slug = $2, description = $3, url = $4, icon = $5, color = $6, department_id = $7, is_active = $8, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $9 RETURNING *`,
+            [name, slug.toLowerCase(), description, url, icon || '📱', color || 'color-blue', department_id || null, is_active, id]
         );
 
         if (result.rows.length === 0) {
@@ -1387,6 +1466,364 @@ app.get('/api/activity/user/:id', requireAdmin, async (req, res) => {
         console.error('Get user activity error:', err);
         res.status(500).json({ error: 'Server error' });
     }
+});
+
+// ============================================
+// DEPARTMENT MANAGEMENT API ROUTES
+// ============================================
+
+// Get all departments
+app.get('/api/departments', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT d.*, COUNT(a.id) as app_count
+            FROM departments d
+            LEFT JOIN apps a ON d.id = a.department_id AND a.is_active = true
+            GROUP BY d.id
+            ORDER BY d.sort_order, d.name
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Get departments error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Create department
+app.post('/api/departments', requireAdmin, async (req, res) => {
+    const { name, slug, sort_order } = req.body;
+
+    if (!name) {
+        return res.status(400).json({ error: 'Name is required' });
+    }
+
+    const deptSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+    try {
+        const maxOrder = await pool.query('SELECT COALESCE(MAX(sort_order), 0) + 1 as next_order FROM departments');
+        const result = await pool.query(
+            'INSERT INTO departments (name, slug, sort_order) VALUES ($1, $2, $3) RETURNING *',
+            [name, deptSlug, sort_order || maxOrder.rows[0].next_order]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        if (err.code === '23505') {
+            return res.status(400).json({ error: 'Department slug already exists' });
+        }
+        console.error('Create department error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Update department
+app.put('/api/departments/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { name, slug, sort_order, is_active } = req.body;
+
+    try {
+        const result = await pool.query(
+            'UPDATE departments SET name = $1, slug = $2, sort_order = $3, is_active = $4 WHERE id = $5 RETURNING *',
+            [name, slug, sort_order, is_active, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Department not found' });
+        }
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Update department error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Delete department
+app.delete('/api/departments/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // Unassign apps from this department first
+        await pool.query('UPDATE apps SET department_id = NULL WHERE department_id = $1', [id]);
+        const result = await pool.query('DELETE FROM departments WHERE id = $1 RETURNING id', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Department not found' });
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Delete department error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// ============================================
+// APP HUB API (called by the App Hub app)
+// ============================================
+
+// SSO token store (in-memory, short-lived)
+const ssoTokens = new Map();
+const SSO_TOKEN_TTL = 60 * 1000; // 60 seconds
+
+// Clean expired SSO tokens every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [token, data] of ssoTokens) {
+        if (now > data.expiresAt) ssoTokens.delete(token);
+    }
+}, 5 * 60 * 1000);
+
+// Authenticate user and return their accessible apps grouped by department
+// Called by App Hub on login
+app.post('/api/hub/authenticate', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    try {
+        // Find user
+        const userResult = await pool.query(
+            'SELECT id, email, password_hash, name, is_admin, is_active FROM users WHERE email = $1',
+            [email.toLowerCase()]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        const user = userResult.rows[0];
+
+        if (!user.is_active) {
+            return res.status(401).json({ error: 'Account is deactivated' });
+        }
+
+        const validPassword = await bcrypt.compare(password, user.password_hash);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Update last login
+        await pool.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+
+        // Get user's accessible apps grouped by department
+        const appsResult = await pool.query(`
+            SELECT a.id, a.name, a.slug, a.description, a.url, a.icon, a.color,
+                   d.id as department_id, d.name as department_name, d.slug as department_slug, d.sort_order as department_sort
+            FROM apps a
+            JOIN user_app_access uaa ON a.id = uaa.app_id
+            LEFT JOIN departments d ON a.department_id = d.id
+            WHERE uaa.user_id = $1 AND a.is_active = true
+            ORDER BY d.sort_order NULLS LAST, d.name, a.name
+        `, [user.id]);
+
+        // Group apps by department
+        const departments = {};
+        const ungrouped = [];
+
+        for (const app of appsResult.rows) {
+            if (app.department_id) {
+                if (!departments[app.department_id]) {
+                    departments[app.department_id] = {
+                        id: app.department_id,
+                        name: app.department_name,
+                        slug: app.department_slug,
+                        sort_order: app.department_sort,
+                        apps: []
+                    };
+                }
+                departments[app.department_id].apps.push({
+                    id: app.id,
+                    name: app.name,
+                    slug: app.slug,
+                    description: app.description,
+                    url: app.url,
+                    icon: app.icon || '📱',
+                    color: app.color || 'color-blue'
+                });
+            } else {
+                ungrouped.push({
+                    id: app.id,
+                    name: app.name,
+                    slug: app.slug,
+                    description: app.description,
+                    url: app.url,
+                    icon: app.icon || '📱',
+                    color: app.color || 'color-blue'
+                });
+            }
+        }
+
+        // Sort departments by sort_order
+        const sortedDepartments = Object.values(departments).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+
+        // Add ungrouped at end if any
+        if (ungrouped.length > 0) {
+            sortedDepartments.push({
+                id: null,
+                name: 'Other',
+                slug: 'other',
+                sort_order: 999,
+                apps: ungrouped
+            });
+        }
+
+        res.json({
+            success: true,
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                is_admin: user.is_admin
+            },
+            departments: sortedDepartments
+        });
+    } catch (err) {
+        console.error('Hub authenticate error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get user's apps (for already-authenticated sessions, called by App Hub)
+app.post('/api/hub/user-apps', async (req, res) => {
+    const { user_id } = req.body;
+    const ssoSecret = req.headers['x-sso-secret'];
+
+    // Verify SSO secret
+    if (!process.env.SSO_SECRET || ssoSecret !== process.env.SSO_SECRET) {
+        return res.status(401).json({ error: 'Invalid SSO secret' });
+    }
+
+    if (!user_id) {
+        return res.status(400).json({ error: 'user_id required' });
+    }
+
+    try {
+        const appsResult = await pool.query(`
+            SELECT a.id, a.name, a.slug, a.description, a.url, a.icon, a.color,
+                   d.id as department_id, d.name as department_name, d.slug as department_slug, d.sort_order as department_sort
+            FROM apps a
+            JOIN user_app_access uaa ON a.id = uaa.app_id
+            LEFT JOIN departments d ON a.department_id = d.id
+            WHERE uaa.user_id = $1 AND a.is_active = true
+            ORDER BY d.sort_order NULLS LAST, d.name, a.name
+        `, [user_id]);
+
+        // Group by department (same logic as authenticate)
+        const departments = {};
+        const ungrouped = [];
+
+        for (const app of appsResult.rows) {
+            if (app.department_id) {
+                if (!departments[app.department_id]) {
+                    departments[app.department_id] = {
+                        id: app.department_id,
+                        name: app.department_name,
+                        slug: app.department_slug,
+                        sort_order: app.department_sort,
+                        apps: []
+                    };
+                }
+                departments[app.department_id].apps.push({
+                    id: app.id, name: app.name, slug: app.slug,
+                    description: app.description, url: app.url,
+                    icon: app.icon || '📱', color: app.color || 'color-blue'
+                });
+            } else {
+                ungrouped.push({
+                    id: app.id, name: app.name, slug: app.slug,
+                    description: app.description, url: app.url,
+                    icon: app.icon || '📱', color: app.color || 'color-blue'
+                });
+            }
+        }
+
+        const sortedDepartments = Object.values(departments).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        if (ungrouped.length > 0) {
+            sortedDepartments.push({ id: null, name: 'Other', slug: 'other', sort_order: 999, apps: ungrouped });
+        }
+
+        res.json({ success: true, departments: sortedDepartments });
+    } catch (err) {
+        console.error('Hub user-apps error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Generate SSO token (called by App Hub when user clicks an app)
+app.post('/api/hub/sso-generate', async (req, res) => {
+    const { user_id, user_email, user_name, is_admin, target_url } = req.body;
+    const ssoSecret = req.headers['x-sso-secret'];
+
+    if (!process.env.SSO_SECRET || ssoSecret !== process.env.SSO_SECRET) {
+        return res.status(401).json({ error: 'Invalid SSO secret' });
+    }
+
+    const ssoToken = crypto.randomBytes(32).toString('hex');
+    ssoTokens.set(ssoToken, {
+        user: { id: user_id, email: user_email, name: user_name, is_admin: is_admin },
+        targetUrl: target_url,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + SSO_TOKEN_TTL,
+        used: false
+    });
+
+    res.json({ success: true, sso_token: ssoToken });
+});
+
+// Validate SSO token (called by individual apps when they receive ?sso_token)
+app.post('/api/hub/sso-validate', async (req, res) => {
+    const { sso_token } = req.body;
+    const ssoSecret = req.headers['x-sso-secret'];
+
+    if (!process.env.SSO_SECRET || ssoSecret !== process.env.SSO_SECRET) {
+        return res.status(401).json({ error: 'Invalid SSO secret' });
+    }
+
+    if (!sso_token) {
+        return res.status(400).json({ error: 'sso_token required' });
+    }
+
+    const tokenData = ssoTokens.get(sso_token);
+
+    if (!tokenData) {
+        return res.status(401).json({ error: 'Invalid or expired SSO token' });
+    }
+
+    if (Date.now() > tokenData.expiresAt) {
+        ssoTokens.delete(sso_token);
+        return res.status(401).json({ error: 'SSO token expired' });
+    }
+
+    if (tokenData.used) {
+        ssoTokens.delete(sso_token);
+        return res.status(401).json({ error: 'SSO token already used' });
+    }
+
+    tokenData.used = true;
+    ssoTokens.delete(sso_token);
+
+    // Log SSO activity
+    try {
+        const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+        const userAgent = req.headers['user-agent'] || 'SSO';
+        
+        // Find the app by URL to log activity
+        if (tokenData.targetUrl) {
+            const appResult = await pool.query('SELECT id FROM apps WHERE url = $1 AND is_active = true', [tokenData.targetUrl]);
+            if (appResult.rows.length > 0) {
+                logLoginActivity(tokenData.user.id, appResult.rows[0].id, ipAddress, userAgent);
+            }
+        }
+    } catch (err) {
+        console.log('SSO activity logging failed:', err.message);
+    }
+
+    res.json({
+        success: true,
+        user: tokenData.user
+    });
 });
 
 // ============================================
