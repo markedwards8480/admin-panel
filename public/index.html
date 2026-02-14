@@ -387,6 +387,10 @@
                 <svg viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>
                 Apps
             </div>
+            <div class="nav-item" data-panel="departments">
+                <svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v8h-8V3zm0 10h8v8h-8v-8z"/></svg>
+                Departments
+            </div>
             <div class="nav-item" data-panel="activity">
                 <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
                 Activity
@@ -462,6 +466,7 @@
                                 <th>Name</th>
                                 <th>Slug</th>
                                 <th>URL</th>
+                                <th>Department</th>
                                 <th>Users</th>
                                 <th>Status</th>
                                 <th>Actions</th>
@@ -469,6 +474,34 @@
                         </thead>
                         <tbody id="appsTableBody"></tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- Departments Panel -->
+            <div class="panel" id="panel-departments">
+                <div class="panel-header">
+                    <h2>Departments</h2>
+                    <button class="btn-primary" onclick="openDeptModal()">+ Add Department</button>
+                </div>
+                <p style="color: #6b7280; margin-bottom: 16px;">Organize your apps into departments. Drag to reorder. Apps assigned to departments will be grouped in the App Hub.</p>
+                <div id="deptList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                <div style="margin-top: 32px;">
+                    <h3 style="margin-bottom: 12px;">App → Department Assignment</h3>
+                    <p style="color: #6b7280; margin-bottom: 16px;">Assign each app to a department, and set its icon and color for the App Hub.</p>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>App</th>
+                                    <th>Department</th>
+                                    <th>Icon</th>
+                                    <th>Color</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="appDeptTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -785,6 +818,40 @@
         </div>
     </div>
 
+    <!-- Department Modal -->
+    <div class="modal-overlay" id="deptModal">
+        <div class="modal" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3 id="deptModalTitle">Add Department</h3>
+                <button class="modal-close" onclick="closeModal('deptModal')">&times;</button>
+            </div>
+            <form id="deptForm">
+                <div class="modal-body">
+                    <input type="hidden" id="deptId">
+                    <div class="form-group">
+                        <label>Department Name</label>
+                        <input type="text" id="deptName" required placeholder="e.g., Operations">
+                    </div>
+                    <div class="form-group">
+                        <label>Sort Order</label>
+                        <input type="number" id="deptSortOrder" value="0" min="0" placeholder="0">
+                        <small style="color:#6b7280;">Lower numbers appear first in the App Hub</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="deptIsActive" checked>
+                            Active
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeModal('deptModal')">Cancel</button>
+                    <button type="submit" class="btn-primary">Save Department</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         let currentUser = null;
         let railwayProjects = [];
@@ -827,6 +894,7 @@
                     if (item.dataset.panel === 'users') loadUsers();
                     if (item.dataset.panel === 'apps') { loadApps(); checkRailwayStatus(); }
                     if (item.dataset.panel === 'dashboard') loadStats();
+                    if (item.dataset.panel === 'departments') loadDepartments();
                     if (item.dataset.panel === 'activity') loadActivity();
                     if (item.dataset.panel === 'health') loadHealth();
                 });
@@ -1300,6 +1368,7 @@
                         <td><strong>${escapeHtml(app.name)}</strong></td>
                         <td><code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;">${escapeHtml(app.slug)}</code></td>
                         <td>${app.url ? `<a href="${escapeHtml(app.url)}" target="_blank" style="color:#4a6cf7;">${escapeHtml(app.url)}</a>` : '-'}</td>
+                        <td>${app.department_name ? `<span style="background:#eef2ff;color:#4338ca;padding:2px 8px;border-radius:4px;font-size:12px;">${escapeHtml(app.department_name)}</span>` : '<span style="color:#9ca3af;">—</span>'}</td>
                         <td>${app.user_count} users</td>
                         <td><span class="badge ${app.is_active ? 'badge-success' : 'badge-danger'}">${app.is_active ? 'Active' : 'Inactive'}</span></td>
                         <td class="action-btns">
@@ -1557,6 +1626,185 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // ============================================
+        // DEPARTMENTS MANAGEMENT
+        // ============================================
+        let allDepartments = [];
+        const ICON_OPTIONS = ['📱','📊','📦','💰','🏭','🔧','📋','🚀','🎨','📈','🛒','📝','⚙️','🏢','📑','🔍','💼','📞','🗂️','✉️'];
+        const COLOR_OPTIONS = [
+            { name: 'Blue', value: 'color-blue', hex: '#007AFF' },
+            { name: 'Purple', value: 'color-purple', hex: '#AF52DE' },
+            { name: 'Green', value: 'color-green', hex: '#34C759' },
+            { name: 'Orange', value: 'color-orange', hex: '#FF9500' },
+            { name: 'Red', value: 'color-red', hex: '#FF3B30' },
+            { name: 'Teal', value: 'color-teal', hex: '#5AC8FA' },
+            { name: 'Pink', value: 'color-pink', hex: '#FF2D55' },
+            { name: 'Indigo', value: 'color-indigo', hex: '#5856D6' },
+        ];
+
+        async function loadDepartments() {
+            try {
+                const [deptRes, appsRes] = await Promise.all([
+                    fetch('/api/departments'),
+                    fetch('/api/apps')
+                ]);
+                allDepartments = await deptRes.json();
+                const apps = await appsRes.json();
+
+                // Render department cards
+                const deptList = document.getElementById('deptList');
+                if (allDepartments.length === 0) {
+                    deptList.innerHTML = '<div style="padding:32px;text-align:center;color:#6b7280;background:#f9fafb;border-radius:8px;">No departments yet. Create one to start organizing your apps in the Hub.</div>';
+                } else {
+                    deptList.innerHTML = allDepartments.map(d => {
+                        const deptApps = apps.filter(a => a.department_id === d.id);
+                        return `
+                        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <span style="font-size:18px;color:#6b7280;">${d.sort_order}</span>
+                                <div>
+                                    <strong>${escapeHtml(d.name)}</strong>
+                                    <span style="color:#6b7280;margin-left:8px;">(${deptApps.length} app${deptApps.length !== 1 ? 's' : ''})</span>
+                                    ${!d.is_active ? '<span class="badge badge-danger" style="margin-left:8px;">Inactive</span>' : ''}
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:8px;">
+                                <button class="btn-icon btn-edit" onclick="editDept(${d.id})" title="Edit">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                                </button>
+                                <button class="btn-icon btn-delete" onclick="deleteDept(${d.id})" title="Delete">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                                </button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+
+                // Render app→department assignment table
+                const tbody = document.getElementById('appDeptTableBody');
+                tbody.innerHTML = apps.map(app => {
+                    const deptOptions = allDepartments.map(d => 
+                        `<option value="${d.id}" ${app.department_id === d.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`
+                    ).join('');
+                    const iconOptions = ICON_OPTIONS.map(i => 
+                        `<option value="${i}" ${(app.icon || '📱') === i ? 'selected' : ''}>${i}</option>`
+                    ).join('');
+                    const colorOptions = COLOR_OPTIONS.map(c => 
+                        `<option value="${c.value}" ${(app.color || 'color-blue') === c.value ? 'selected' : ''} style="color:${c.hex}">${c.name}</option>`
+                    ).join('');
+                    return `
+                    <tr>
+                        <td><strong>${escapeHtml(app.name)}</strong></td>
+                        <td>
+                            <select onchange="updateAppDept(${app.id}, this.value)" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                <option value="">— None —</option>
+                                ${deptOptions}
+                            </select>
+                        </td>
+                        <td>
+                            <select onchange="updateAppIcon(${app.id}, this.value)" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:16px;">
+                                ${iconOptions}
+                            </select>
+                        </td>
+                        <td>
+                            <select onchange="updateAppColor(${app.id}, this.value)" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                ${colorOptions}
+                            </select>
+                        </td>
+                        <td>
+                            <span style="display:inline-block;width:24px;height:24px;border-radius:6px;background:${(COLOR_OPTIONS.find(c => c.value === (app.color || 'color-blue'))?.hex) || '#007AFF'};vertical-align:middle;"></span>
+                        </td>
+                    </tr>`;
+                }).join('');
+            } catch (err) {
+                console.error('Failed to load departments:', err);
+            }
+        }
+
+        function openDeptModal(dept = null) {
+            document.getElementById('deptModalTitle').textContent = dept ? 'Edit Department' : 'Add Department';
+            document.getElementById('deptId').value = dept?.id || '';
+            document.getElementById('deptName').value = dept?.name || '';
+            document.getElementById('deptSortOrder').value = dept?.sort_order ?? (allDepartments.length + 1);
+            document.getElementById('deptIsActive').checked = dept?.is_active ?? true;
+            document.getElementById('deptModal').classList.add('active');
+        }
+
+        async function editDept(id) {
+            const dept = allDepartments.find(d => d.id === id);
+            if (dept) openDeptModal(dept);
+        }
+
+        document.getElementById('deptForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('deptId').value;
+            const data = {
+                name: document.getElementById('deptName').value,
+                sort_order: parseInt(document.getElementById('deptSortOrder').value) || 0,
+                is_active: document.getElementById('deptIsActive').checked
+            };
+            try {
+                const res = await fetch(id ? `/api/departments/${id}` : '/api/departments', {
+                    method: id ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (!res.ok) { const err = await res.json(); alert(err.error || 'Failed to save'); return; }
+                closeModal('deptModal');
+                loadDepartments();
+            } catch (err) { alert('Failed to save department'); }
+        });
+
+        async function deleteDept(id) {
+            const dept = allDepartments.find(d => d.id === id);
+            if (!confirm(`Delete "${dept?.name}"? Apps in this department will become unassigned.`)) return;
+            try {
+                const res = await fetch(`/api/departments/${id}`, { method: 'DELETE' });
+                if (!res.ok) { const err = await res.json(); alert(err.error || 'Failed to delete'); return; }
+                loadDepartments();
+            } catch (err) { alert('Failed to delete department'); }
+        }
+
+        async function updateAppDept(appId, deptId) {
+            await updateAppField(appId, { department_id: deptId || null });
+        }
+        async function updateAppIcon(appId, icon) {
+            await updateAppField(appId, { icon });
+        }
+        async function updateAppColor(appId, color) {
+            await updateAppField(appId, { color });
+            loadDepartments(); // refresh color swatches
+        }
+
+        async function updateAppField(appId, fields) {
+            try {
+                // Fetch current app data first
+                const appsRes = await fetch('/api/apps');
+                const apps = await appsRes.json();
+                const app = apps.find(a => a.id === appId);
+                if (!app) return;
+
+                const data = {
+                    name: app.name,
+                    slug: app.slug,
+                    description: app.description || '',
+                    url: app.url || '',
+                    icon: app.icon || '📱',
+                    color: app.color || 'color-blue',
+                    department_id: app.department_id,
+                    is_active: app.is_active,
+                    ...fields
+                };
+
+                const res = await fetch(`/api/apps/${appId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (!res.ok) { const err = await res.json(); alert(err.error || 'Failed to update'); }
+            } catch (err) { console.error('Failed to update app:', err); }
         }
 
         // Close modals on overlay click
