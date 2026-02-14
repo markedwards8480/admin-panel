@@ -1518,7 +1518,8 @@ app.post('/api/departments', requireAdmin, async (req, res) => {
 // Update department
 app.put('/api/departments/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
-    const { name, slug, sort_order, is_active } = req.body;
+    const { name, sort_order, is_active } = req.body;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
     try {
         const result = await pool.query(
