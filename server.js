@@ -11,6 +11,17 @@ const app = express();
 app.set('trust proxy', 1); // Trust first proxy (Railway)
 const PORT = process.env.PORT || 3000;
 
+// --- Origin Protection ---
+const ORIGIN_SECRET = process.env.ORIGIN_SECRET;
+if (ORIGIN_SECRET) {
+      app.use((req, res, next) => {
+              if (req.headers['x-origin-secret'] === ORIGIN_SECRET) {
+                        return next();
+              }
+              res.status(403).json({ error: 'Direct access not allowed' });
+      });
+}
+
 // Database connection
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
